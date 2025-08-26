@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quality Analysis Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; }
+        .chart-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 300px;
+            background-color: #374151; /* gray-700 */
+            color: #9ca3af; /* gray-400 */
+            border-radius: 0.75rem;
+            border: 2px dashed #4b5563; /* gray-600 */
+        }
+    </style>
+     <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900">
+
+    <div id="login-page">
+        <div class="flex items-center justify-center min-h-screen">
+            <div class="w-full max-w-md bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg">
+                <div class="flex items-center justify-center mb-6">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-500 h-10 w-10"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+                    <span class="font-bold text-2xl ml-2 text-gray-800 dark:text-gray-200">QualityDeck</span>
+                </div>
+                <h2 class="text-xl font-bold text-center text-gray-800 dark:text-gray-200 mb-6">Login to your account</h2>
+                <div id="login-error" class="hidden bg-red-100 text-red-700 p-3 rounded-md mb-4"></div>
+                <form id="login-form" class="space-y-6">
+                    <div>
+                        <label for="username" class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Username</label>
+                        <input type="text" id="username" name="username" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required />
+                    </div>
+                    <div>
+                        <label for="password" class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Password</label>
+                        <input type="password" id="password" name="password" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required />
+                    </div>
+                    <button type="submit" class="w-full bg-indigo-600 text-white font-bold py-2 px-6 rounded-md hover:bg-indigo-700 transition duration-300">Login</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="app-container" class="hidden">
+        <!-- Navbar -->
+        <nav id="navbar" class="bg-white dark:bg-gray-800 shadow-md sticky top-0 z-50">
+            <!-- Navbar content will be rendered here -->
+        </nav>
+
+        <main class="p-4 sm:p-6 md:p-8">
+            <div id="page-content">
+                <!-- Dynamic content will be injected here -->
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const App = {
+            // --- App State & Data ---
+            state: {
+                currentUser: null,
+                currentPage: 'dashboard',
+                selectedAuditor: null,
+                selectedSupervisor: null,
+                selectedAgent: null,
+                viewRole: 'analyst',
+                timeFilter: 'monthly', // Default to monthly
+                auditTypeFilter: 'all',
+                audits: [], // Data is now stored locally in this array
+                selectedMonth: new Date().getMonth(), // 0-11
+                selectedYear: new Date().getFullYear(),
+                chartInstance: null,
+            },
+
+            // --- User Data ---
+            users: {
+                'QAKoustov': { password: 'Bencos@2025', canAudit: true, auditorId: 'koustav_chatterjee_02' },
+                'Pritha': { password: 'Bencos@2025', canAudit: false },
+            },
+
+            // --- Data Definitions ---
+            qualityAuditors: [
+                { uid: 'diya_bose_01', name: 'Diya Bose', agents: ['Tumpa Adhikary', 'Debomita Chakraborty', 'Rumpa Adhikary', 'Aniket Roy', 'Dipankar Saha', 'Diya Jadav', 'Jayeeta Chowdhury', 'Jayanta Paul', 'Debanjan Paul', 'Raj Bhowmick', 'Bikram Jana', 'SK Mijanoor', 'Dipali Mallick', 'Rekha Bansfore', 'Raj Das', 'Balaram Mondal', 'Sudip Mondal', 'Rupam Ghosh', 'Rimpa Dey', 'Shouvik Seal', 'Subhrapati Bisai'] },
+                { uid: 'koustav_chatterjee_02', name: 'Koustav Chatterjee', agents: ['Debjit Podder', 'Avik Das', 'Aritri Ghosh', 'Ankan Barman', 'Dwip Paul', 'Mousumi Dey', 'Debmalya Guha', 'Susmita Chakraborty', 'Kiran Ghosh', 'Taniya Roy', 'Priti Saha', 'Sneha Basak', 'Anjali Mallik', 'Sagarika Banarjee', 'Alok Bauri', 'Aparna Mondal', 'Bidisha Mukherjee', 'Mithu Dey', 'Sinjan Das', 'Ankita Shingh', 'Alik Nath'] },
+                { uid: 'pallab_gayen_03', name: 'Pallab Gayen', agents: ['Anjali Bhattacharjee', 'Ratan Halder', 'Sayan Byapari', 'Dipanjan Paul', 'Sneha Sarkar', 'Soham Roy', 'Bikash Mahakud', 'Subham Saha', 'Keya Biswas', 'Subhojit Biswas', 'Subhajit Mondal', 'Piyali Das', 'Sampa Modak', 'Prasun Das', 'Bishal Ray', 'Shiuli Pradhan', 'Sudip Biswas', 'Subhojit Sarkar', 'Sagar Sinha', 'Dhrubojyoti'] },
+                { uid: 'riya_barui_04', name: 'Riya Barui', agents: ['Sweety Poddar', 'Srabonti Podder', 'Anay Basu Roy', 'Taniya Biswas', 'Debanjana Manna', 'Rohit Goswami', 'Tapas Basak', 'Abhijit Halder', 'Mowmita Paul', 'Sujata Sammader', 'Roni Dey', 'Rahul Paul', 'Krishnendu', 'Ritwika Saha', 'Tubai Dey', 'Bibak Das', 'Sharmila Saha Podder', 'Kiranmay Dey', 'Argha Basak', 'Tamal'] },
+                { uid: 'surajit_halder_05', name: 'Surajit Halder', agents: ['Samrit Dutta', 'Nilanjan Das', 'Puja Mallick', 'Suman Mondal', 'Dweep Dey', 'Sumana Manna', 'Subhajit Das', 'Deep Das', 'Joy Roy Chowdhury', 'Biswajit Ghosh', 'Pravash Sarkar', 'Jyoti Thakur', 'Toushik Das', 'Soumen Das', 'Abeg Ghosh', 'Suman Kayal', 'Pijush Kanti Saha', 'Priyanka', 'Swarnadeep', 'Chanchal'] },
+                { uid: 'tanaya_debroy_06', name: 'Tanaya Debroy', agents: ['Arpan Dutta', 'Kanchan kumar Ram', 'Subrata Das', 'Lovely Dasgupta', 'Rahul Debnath', 'Arijit Das', 'Bishal Seal', 'Pampairani Katari', 'Aishwary Dey', 'Puja Pule', 'Samar Saren', 'Alimpa Paul', 'Ranita Ghosh', 'Moumita Sarkar', 'Rana Goswami', 'Nilanjan Paul', 'Sagar Saha', 'Jyoti Biswas', 'Parthiv Basu'] },
+            ],
+            supervisors: [
+                { uid: 'arup_banerjee_s1', name: 'Arup Banerjee', teamId: 'team_arup' },
+                { uid: 'bhagyashree_saha_s2', name: 'Bhagyashree Saha', teamId: 'team_bhagyashree' },
+                { uid: 'krishnendu_pal_s3', name: 'Krishnendu Pal', teamId: 'team_krishnendu' },
+                { uid: 'lucky_roy_s4', name: 'Lucky Roy', teamId: 'team_lucky' },
+                { uid: 'salini_podder_s5', name: 'Salini Podder', teamId: 'team_salini' },
+                { uid: 'sayan_biswas_s6', name: 'Sayan Biswas', teamId: 'team_sayan' },
+                { uid: 'soumendra_nath_das_s7', name: 'Soumendra Nath Das', teamId: 'team_soumendra' },
+                { uid: 'subhojit_das_s8', name: 'Subhojit Das', teamId: 'team_subhojit' },
+                { uid: 'tuhin_giri_s9', name: 'Tuhin Giri', teamId: 'team_tuhin' },
+            ],
+            allAgents: [],
+            scoringParameters: [
+                { id: 'timelyManner', text: "Did the agent respond to the player in a timely manner?", points: 10, partialPoints: 5 },
+                { id: 'securityProtocols', text: "Did the agent follow proper security and account verification protocols?", points: 10, partialPoints: 5 },
+                { id: 'professionalInteraction', text: "Did the agent handle the interaction professionally and respectfully?", points: 10 },
+                { id: 'empathy', text: "Did the agent show empathy and care when addressing the player's concerns?", points: 10 },
+                { id: 'understandAndRespond', text: "Did the agent understand the player's concern and provide accurate and confident responses?", points: 20, partialPoints: 10 },
+                { id: 'interactionProcedures', text: "Did the agent adhere to proper interaction procedures?", points: 20 },
+                { id: 'resolveIssue', text: "Did the agent resolve the player's issue or provide alternative options if a solution wasn't possible?", points: 5 },
+                { id: 'upsell', text: "Did the agent upsell promotions or new products where appropriate?", points: 5 },
+                { id: 'thankPlayer', text: "Did the agent thank the player for his time and his business with us?", points: 5 },
+                { id: 'satisfied', text: "Was the player satisfied with the service provided?", points: 5, partialPoints: 2.5 },
+            ],
+
+            // --- Initialization ---
+            init() {
+                this.allAgents = [...new Set(this.qualityAuditors.flatMap(auditor => auditor.agents))].sort();
+                this.state.selectedAuditor = this.qualityAuditors[0];
+                this.state.selectedSupervisor = this.supervisors[0];
+                this.state.selectedAgent = this.allAgents[0];
+                this.initLogin();
+                
+                if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+            },
+
+            // --- UI & Event Handling ---
+            initTheme() {
+                const themeToggle = document.getElementById('theme-toggle');
+                if (!themeToggle) return; // Safeguard
+                const lightIcon = document.getElementById('theme-icon-light');
+                const darkIcon = document.getElementById('theme-icon-dark');
+                
+                const apply = () => {
+                    if (document.documentElement.classList.contains('dark')) {
+                        darkIcon.classList.remove('hidden');
+                        lightIcon.classList.add('hidden');
+                    } else {
+                        darkIcon.classList.add('hidden');
+                        lightIcon.classList.remove('hidden');
+                    }
+                };
+                
+                themeToggle.addEventListener('click', () => {
+                    document.documentElement.classList.toggle('dark');
+                    localStorage.theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+                    apply();
+                    this.render(); // Re-render chart with new theme colors
+                });
+                apply();
+            },
+
+            initLogin() {
+                const loginForm = document.getElementById('login-form');
+                loginForm.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const username = e.target.username.value;
+                    const password = e.target.password.value;
+                    const user = this.users[username];
+                    const errorDiv = document.getElementById('login-error');
+
+                    if (user && user.password === password) {
+                        this.state.currentUser = { id: username, ...user };
+                        if (user.auditorId) {
+                            this.state.selectedAuditor = this.qualityAuditors.find(qa => qa.uid === user.auditorId) || this.qualityAuditors[0];
+                        }
+                        document.getElementById('login-page').classList.add('hidden');
+                        document.getElementById('app-container').classList.remove('hidden');
+                        
+                        this.initNavigation();
+                        this.navigate('dashboard');
+                    } else {
+                        errorDiv.textContent = 'Invalid username or password.';
+                        errorDiv.classList.remove('hidden');
+                    }
+                });
+            },
+
+            initNavigation() {
+                const navbar = document.getElementById('navbar');
+                navbar.innerHTML = this.getNavbarHTML();
+                this.initTheme(); // Init theme toggle after navbar is rendered
+                navbar.addEventListener('click', (e) => {
+                    const navButton = e.target.closest('[data-nav]');
+                    const logoutButton = e.target.closest('#logout-btn');
+                    if (navButton) {
+                        this.navigate(navButton.dataset.nav);
+                    }
+                    if (logoutButton) {
+                        this.logout();
+                    }
+                });
+            },
+            
+            logout() {
+                this.state.currentUser = null;
+                this.state.audits = []; // Clear data on logout
+                document.getElementById('login-page').classList.remove('hidden');
+                document.getElementById('app-container').classList.add('hidden');
+                document.getElementById('login-form').reset();
+                document.getElementById('login-error').classList.add('hidden');
+            },
+
+            navigate(page) {
+                if (page === 'audit' && !this.state.currentUser.canAudit) {
+                    this.state.currentPage = 'dashboard';
+                } else {
+                    this.state.currentPage = page;
+                }
+                this.render();
+            },
+            
+            render() {
+                const content = document.getElementById('page-content');
+                if (this.state.currentPage === 'dashboard') {
+                    content.innerHTML = this.getDashboardHTML();
+                    this.attachDashboardListeners();
+                } else if (this.state.currentPage === 'audit') {
+                    content.innerHTML = this.getAuditFormHTML();
+                    this.attachAuditFormListeners();
+                }
+            },
+
+            exportToCSV() {
+                if (this.state.audits.length === 0) {
+                    alert("No audit data to export.");
+                    return;
+                }
+
+                const headers = ['AuditDate', 'AuditorName', 'AgentName', 'TeamID', 'ChatID', 'AuditType', 'TotalScore', 'ContactReason', 'CoachingArea', 'CoachingComments', 'Remarks'];
+                const scoringHeaders = this.scoringParameters.map(p => p.id);
+                const allHeaders = [...headers, ...scoringHeaders];
+
+                let csvContent = "data:text/csv;charset=utf-8," + allHeaders.join(",") + "\n";
+
+                this.state.audits.forEach(audit => {
+                    const row = [
+                        new Date(audit.auditDate).toLocaleString(),
+                        `"${audit.auditorName}"`,
+                        `"${audit.agentName}"`,
+                        `"${audit.teamId}"`,
+                        `"${audit.chatId}"`,
+                        `"${audit.auditType}"`,
+                        audit.totalScore,
+                        `"${(audit.contactReason || []).join('; ')}"`,
+                        `"${audit.coachingArea || ''}"`,
+                        `"${(audit.coachingComments || '').replace(/"/g, '""')}"`,
+                        `"${(audit.remarks || '').replace(/"/g, '""')}"`,
+                    ];
+                    
+                    scoringHeaders.forEach(sh => {
+                        row.push(`"${audit.scores[sh] || 'N/A'}"`);
+                    });
+
+                    csvContent += row.join(",") + "\n";
+                });
+
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "audit_export.csv");
+                document.body.appendChild(link); 
+                link.click();
+                document.body.removeChild(link);
+            },
+
+            // --- HTML Template Generation ---
+            getNavbarHTML() {
+                return `
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div class="flex items-center justify-between h-16">
+                        <div class="flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-indigo-500 h-8 w-8"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+                            <span class="font-bold text-xl ml-2 text-gray-800 dark:text-gray-200">QualityDeck</span>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <span class="text-gray-600 dark:text-gray-300">Welcome, ${this.state.currentUser.id}</span>
+                            <button data-nav="dashboard" class="text-gray-600 dark:text-gray-300 hover:text-indigo-500 dark:hover:text-indigo-400 px-3 py-2 rounded-md text-sm font-medium">Dashboard</button>
+                            ${this.state.currentUser.canAudit ? `<button data-nav="audit" class="bg-indigo-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">New Audit</button>` : ''}
+                            <button id="logout-btn" class="text-gray-600 dark:text-gray-300 hover:text-indigo-500 dark:hover:text-indigo-400 px-3 py-2 rounded-md text-sm font-medium">Logout</button>
+                            <button id="theme-toggle" class="p-2 rounded-full text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700">
+                                <svg id="theme-icon-light" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                                <svg id="theme-icon-dark" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>`;
+            },
+
+            getDashboardHTML() {
+                // Filter by role first
+                let roleFilteredAudits = this.state.audits;
+                if (this.state.viewRole === 'supervisor') {
+                    roleFilteredAudits = this.state.audits.filter(a => a.teamId === this.state.selectedSupervisor.teamId);
+                } else if (this.state.viewRole === 'agent') {
+                    roleFilteredAudits = this.state.audits.filter(a => a.agentName === this.state.selectedAgent);
+                } else { // analyst
+                    roleFilteredAudits = this.state.audits.filter(a => a.auditorId === this.state.selectedAuditor.uid);
+                }
+
+                // Filter by audit type
+                let typeFilteredAudits = roleFilteredAudits;
+                if(this.state.auditTypeFilter !== 'all'){
+                    typeFilteredAudits = roleFilteredAudits.filter(a => a.auditType === this.state.auditTypeFilter);
+                }
+
+                // Filter by time
+                const now = new Date();
+                const filteredAudits = typeFilteredAudits.filter(audit => {
+                    const auditDate = new Date(audit.auditDate); // Use date object from local data
+                    if (this.state.timeFilter === 'daily') return auditDate.toDateString() === now.toDateString();
+                    if (this.state.timeFilter === 'weekly') return auditDate >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+                    if (this.state.timeFilter === 'monthly') return auditDate.getMonth() === this.state.selectedMonth && auditDate.getFullYear() === this.state.selectedYear;
+                    return true;
+                });
+
+                const totalAudits = filteredAudits.length;
+                const avgScore = totalAudits > 0 ? (filteredAudits.reduce((sum, a) => sum + a.totalScore, 0) / totalAudits).toFixed(2) : 0;
+                
+                const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                const yearOptions = [new Date().getFullYear() -1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => `<option value="${y}" ${this.state.selectedYear === y ? 'selected' : ''}>${y}</option>`).join('');
+                const monthOptions = monthNames.map((m, i) => `<option value="${i}" ${this.state.selectedMonth === i ? 'selected' : ''}>${m}</option>`).join('');
+
+                return `
+                    <div class="space-y-8">
+                        <div class="flex flex-wrap justify-between items-center gap-4">
+                            <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-200">Dashboard</h1>
+                            <div class="flex items-center gap-4 flex-wrap">
+                                <button id="export-csv-btn" class="bg-green-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-green-700">Export to CSV</button>
+                                <div class="flex space-x-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm" data-group="auditTypeFilter">${['all', 'internal', 'external'].map(f => `<button data-filter="${f}" class="px-4 py-1 rounded-md text-sm capitalize ${this.state.auditTypeFilter === f ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-300'}">${f}</button>`).join('')}</div>
+                                <div class="flex space-x-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm" data-group="timeFilter">${['daily', 'weekly', 'monthly'].map(f => `<button data-filter="${f}" class="px-4 py-1 rounded-md text-sm capitalize ${this.state.timeFilter === f ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-300'}">${f}</button>`).join('')}</div>
+                                <div class="flex items-center gap-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm">
+                                    <select id="month-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-1.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white">${monthOptions}</select>
+                                    <select id="year-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-1.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white">${yearOptions}</select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex space-x-2 bg-white dark:bg-gray-800 p-2 rounded-lg shadow-sm" data-group="viewRole">
+                            <button data-role="analyst" class="flex-1 px-4 py-2 rounded-md text-sm font-semibold ${this.state.viewRole === 'analyst' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700'}">Quality Analyst</button>
+                            <button data-role="supervisor" class="flex-1 px-4 py-2 rounded-md text-sm font-semibold ${this.state.viewRole === 'supervisor' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700'}">Supervisor</button>
+                            <button data-role="agent" class="flex-1 px-4 py-2 rounded-md text-sm font-semibold ${this.state.viewRole === 'agent' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700'}">Agent</button>
+                        </div>
+                        <div id="selector-container"></div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg flex items-center"><div class="bg-blue-100 dark:bg-blue-900/50 p-3 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500 dark:text-blue-400 h-6 w-6"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg></div><div class="ml-4"><p class="text-gray-500 dark:text-gray-400 text-sm">Total Audits</p><p class="text-2xl font-bold text-gray-800 dark:text-gray-200">${totalAudits}</p></div></div><div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg flex items-center"><div class="bg-green-100 dark:bg-green-900/50 p-3 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 dark:text-green-400 h-6 w-6"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg></div><div class="ml-4"><p class="text-gray-500 dark:text-gray-400 text-sm">Average Score</p><p class="text-2xl font-bold text-gray-800 dark:text-gray-200">${avgScore}%</p></div></div></div>
+                        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg"><h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">Team Performance</h3><div class="h-[300px]"><canvas id="performance-chart"></canvas></div></div>
+                        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg"><h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">Recent Audits</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500 dark:text-gray-400"><thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400"><tr><th scope="col" class="px-6 py-3">Agent</th><th scope="col" class="px-6 py-3">Team</th><th scope="col" class="px-6 py-3">Audit Date</th><th scope="col" class="px-6 py-3">Type</th><th scope="col" class="px-6 py-3">Score</th><th scope="col" class="px-6 py-3">Auditor</th></tr></thead><tbody>${filteredAudits.length > 0 ? filteredAudits.map(audit => `
+                            <tr class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"><td class="px-6 py-4 font-medium text-gray-900 dark:text-white">${audit.agentName}</td><td class="px-6 py-4">${audit.teamId}</td><td class="px-6 py-4">${new Date(audit.auditDate).toLocaleDateString()}</td><td class="px-6 py-4 capitalize">${audit.auditType}</td><td class="px-6 py-4">${audit.totalScore}%</td><td class="px-6 py-4">${audit.auditorName}</td></tr>`).join('') : `<tr><td colspan="6" class="text-center text-gray-500 py-4">No audits found.</td></tr>`}</tbody></table></div></div>
+                    </div>`;
+            },
+            
+            attachDashboardListeners() {
+                const content = document.getElementById('page-content');
+                content.addEventListener('click', (e) => {
+                    const button = e.target.closest('button');
+                    if (!button) return;
+
+                    const group = button.parentElement.dataset.group;
+                    if (group === 'auditTypeFilter') {
+                        this.state.auditTypeFilter = button.dataset.filter;
+                        this.render();
+                    } else if (group === 'timeFilter') {
+                        this.state.timeFilter = button.dataset.filter;
+                        const now = new Date();
+                        this.state.selectedMonth = now.getMonth();
+                        this.state.selectedYear = now.getFullYear();
+                        this.render();
+                    } else if (group === 'viewRole') {
+                        this.state.viewRole = button.dataset.role;
+                        this.render();
+                    }
+                });
+                
+                document.getElementById('month-select').addEventListener('change', (e) => {
+                    this.state.selectedMonth = parseInt(e.target.value);
+                    this.state.timeFilter = 'monthly';
+                    this.render();
+                });
+                document.getElementById('year-select').addEventListener('change', (e) => {
+                    this.state.selectedYear = parseInt(e.target.value);
+                    this.state.timeFilter = 'monthly';
+                    this.render();
+                });
+
+                const selectorContainer = document.getElementById('selector-container');
+                if (this.state.viewRole === 'analyst') {
+                    selectorContainer.innerHTML = `<div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm"><label for="auditor-select" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Auditor:</label><select id="auditor-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">${this.qualityAuditors.map(a => `<option value="${a.uid}" ${a.uid === this.state.selectedAuditor.uid ? 'selected' : ''}>${a.name}</option>`).join('')}</select></div>`;
+                    document.getElementById('auditor-select').addEventListener('change', (e) => {
+                        this.state.selectedAuditor = this.qualityAuditors.find(a => a.uid === e.target.value);
+                        this.render();
+                    });
+                } else if (this.state.viewRole === 'supervisor') {
+                    selectorContainer.innerHTML = `<div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm"><label for="supervisor-select" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Supervisor:</label><select id="supervisor-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">${this.supervisors.map(s => `<option value="${s.uid}" ${s.uid === this.state.selectedSupervisor.uid ? 'selected' : ''}>${s.name}</option>`).join('')}</select></div>`;
+                    document.getElementById('supervisor-select').addEventListener('change', (e) => {
+                        this.state.selectedSupervisor = this.supervisors.find(s => s.uid === e.target.value);
+                        this.render();
+                    });
+                } else if (this.state.viewRole === 'agent') {
+                    selectorContainer.innerHTML = `<div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm"><label for="agent-select" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Agent:</label><select id="agent-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">${this.allAgents.map(name => `<option value="${name}" ${name === this.state.selectedAgent ? 'selected' : ''}>${name}</option>`).join('')}</select></div>`;
+                    document.getElementById('agent-select').addEventListener('change', (e) => {
+                        this.state.selectedAgent = e.target.value;
+                        this.render();
+                    });
+                }
+                document.getElementById('export-csv-btn').addEventListener('click', () => this.exportToCSV());
+                this.renderChart();
+            },
+
+            renderChart() {
+                const ctx = document.getElementById('performance-chart');
+                if (!ctx) return;
+
+                if (this.state.chartInstance) {
+                    this.state.chartInstance.destroy();
+                }
+
+                // Recalculate filtered audits for the chart
+                let roleFilteredAudits = this.state.audits;
+                if (this.state.viewRole === 'supervisor') roleFilteredAudits = this.state.audits.filter(a => a.teamId === this.state.selectedSupervisor.teamId);
+                else if (this.state.viewRole === 'agent') roleFilteredAudits = this.state.audits.filter(a => a.agentName === this.state.selectedAgent);
+                else roleFilteredAudits = this.state.audits.filter(a => a.auditorId === this.state.selectedAuditor.uid);
+                
+                let typeFilteredAudits = roleFilteredAudits;
+                if(this.state.auditTypeFilter !== 'all') typeFilteredAudits = roleFilteredAudits.filter(a => a.auditType === this.state.auditTypeFilter);
+                
+                const now = new Date();
+                const filteredAudits = typeFilteredAudits.filter(audit => {
+                    const auditDate = new Date(audit.auditDate);
+                    if (this.state.timeFilter === 'daily') return auditDate.toDateString() === now.toDateString();
+                    if (this.state.timeFilter === 'weekly') return auditDate >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+                    if (this.state.timeFilter === 'monthly') return auditDate.getMonth() === this.state.selectedMonth && auditDate.getFullYear() === this.state.selectedYear;
+                    return true;
+                });
+
+                const agentScores = filteredAudits.reduce((acc, audit) => {
+                    acc[audit.agentName] = acc[audit.agentName] || { totalScore: 0, count: 0 };
+                    acc[audit.agentName].totalScore += audit.totalScore;
+                    acc[audit.agentName].count++;
+                    return acc;
+                }, {});
+
+                const labels = Object.keys(agentScores);
+                const data = labels.map(label => (agentScores[label].totalScore / agentScores[label].count).toFixed(2));
+                const isDark = document.documentElement.classList.contains('dark');
+
+                this.state.chartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Average Score',
+                            data: data,
+                            backgroundColor: 'rgba(79, 70, 229, 0.8)',
+                            borderColor: 'rgba(79, 70, 229, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                grid: { color: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' },
+                                ticks: { color: isDark ? '#9ca3af' : '#4b5563' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: isDark ? '#9ca3af' : '#4b5563' }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                labels: { color: isDark ? '#9ca3af' : '#4b5563' }
+                            }
+                        }
+                    }
+                });
+            },
+
+            getAuditFormHTML() {
+                const currentAuditor = this.state.selectedAuditor;
+                const agentOptions = currentAuditor.agents.map(agent => `<option value="${agent}">${agent}</option>`).join('');
+
+                return `
+                <div class="max-w-4xl mx-auto bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg">
+                    <h2 class="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6">Chat Audit</h2>
+                    <div id="form-messages"></div>
+                    <form id="audit-form" class="space-y-8">
+                        <section>
+                            <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b pb-2 dark:border-gray-600">Case Details</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Auditor Name</label><input type="text" value="${currentAuditor.name}" readonly class="w-full px-3 py-2 border rounded-md bg-gray-200 dark:bg-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-500" /></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Agent Name</label><select name="agentName" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select an Agent</option>${agentOptions}</select></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Team (Supervisor)</label><select name="teamId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select a Team</option>${this.supervisors.map(s => `<option value="${s.teamId}">${s.name}</option>`).join('')}</select></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Chat ID / Customer ID</label><input type="text" name="chatId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
+                                <div class="md:col-span-2"><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Audit Type</label><div class="flex items-center space-x-6"><label class="flex items-center cursor-pointer"><input type="radio" name="auditType" value="internal" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">Internal</span></label><label class="flex items-center cursor-pointer"><input type="radio" name="auditType" value="external" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">External</span></label></div></div>
+                                <div class="md:col-span-2"><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Contact Reason</label><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${['Deposit', 'Withdraw', 'Promotions', 'Accounts', 'Games'].map(reason => `<label class="flex items-center"><input type="checkbox" name="contactReason" value="${reason}" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">${reason}</span></label>`).join('')}</div></div>
+                            </div>
+                        </section>
+                        <section>
+                            <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b pb-2 dark:border-gray-600">Scoring Parameters</h3>
+                            <div class="space-y-4">${this.scoringParameters.map(param => `
+                                <div class="p-4 rounded-md bg-gray-50 dark:bg-gray-700/50">
+                                    <label class="block text-gray-800 dark:text-gray-200 font-medium">${param.text} <span class="text-sm font-normal text-gray-500 dark:text-gray-400">(${param.points} points)</span></label>
+                                    <div class="flex items-center space-x-6 mt-2">
+                                        <label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="yes" class="h-4 w-4 text-green-600 border-gray-300 focus:ring-green-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">Yes</span></label>
+                                        <label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="no" class="h-4 w-4 text-red-600 border-gray-300 focus:ring-red-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">No</span></label>
+                                        ${param.partialPoints ? `<label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="partial" class="h-4 w-4 text-yellow-500 border-gray-300 focus:ring-yellow-400" /><span class="ml-2 text-gray-700 dark:text-gray-300">Partial (${param.partialPoints} pts)</span></label>` : ''}
+                                        <label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="na" checked class="h-4 w-4 text-gray-500 border-gray-300 focus:ring-gray-400" /><span class="ml-2 text-gray-700 dark:text-gray-300">N/A</span></label>
+                                    </div>
+                                </div>`).join('')}
+                            </div>
+                        </section>
+                        <section>
+                             <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b pb-2 dark:border-gray-600">Coaching & Feedback</h3>
+                            <div class="space-y-4">
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Please select on what the agent needs to be coached at.</label><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${['Chat Handling', 'Product knowledge', 'Process Adherence', 'Communication Style', 'Others'].map(area => `<label class="flex items-center"><input type="radio" name="coachingArea" value="${area}" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">${area}</span></label>`).join('')}</div></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">If "Others" please elaborate.</label><textarea name="coachingComments" rows="3" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">General Remarks & Feedback</label><textarea name="remarks" rows="4" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea></div>
+                            </div>
+                        </section>
+                        <div class="text-right pt-4"><button type="submit" id="submit-audit" class="bg-indigo-600 text-white font-bold py-2 px-6 rounded-md hover:bg-indigo-700 disabled:bg-indigo-300 transition duration-300">Submit Audit</button></div>
+                    </form>
+                </div>`;
+            },
+
+            attachAuditFormListeners() {
+                document.getElementById('audit-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const form = e.target;
+                    const formData = new FormData(form);
+                    const formMessages = document.getElementById('form-messages');
+                    const submitButton = document.getElementById('submit-audit');
+                    
+                    const data = { scores: {} };
+                    formData.forEach((value, key) => {
+                        if (key === 'contactReason') {
+                            if (!data[key]) data[key] = [];
+                            data[key].push(value);
+                        } else {
+                            data[key] = value;
+                        }
+                    });
+
+                    if (!data.agentName || !data.teamId || !data.chatId) {
+                        formMessages.innerHTML = `<p class="bg-red-100 text-red-700 p-3 rounded-md mb-4">Please fill in all required fields.</p>`;
+                        return;
+                    }
+                    
+                    submitButton.disabled = true;
+                    submitButton.textContent = 'Submitting...';
+
+                    let totalScore = 0;
+                    this.scoringParameters.forEach(param => {
+                        const value = formData.get(param.id);
+                        data.scores[param.id] = value;
+                        if (value === 'yes') totalScore += param.points;
+                        if (value === 'partial') totalScore += param.partialPoints || 0;
+                    });
+                    
+                    data.totalScore = totalScore;
+                    data.auditDate = new Date();
+                    data.auditorId = this.state.selectedAuditor.uid;
+                    data.auditorName = this.state.selectedAuditor.name;
+
+                    try {
+                        const auditsCollectionPath = `artifacts/${this.APP_ID}/public/data/audits`;
+                        await addDoc(collection(this.db, auditsCollectionPath), data);
+                        formMessages.innerHTML = `<p class="bg-green-100 text-green-700 p-3 rounded-md mb-4">Audit submitted successfully!</p>`;
+                        form.reset();
+                        setTimeout(() => this.navigate('dashboard'), 2000);
+                    } catch (err) {
+                        formMessages.innerHTML = `<p class="bg-red-100 text-red-700 p-3 rounded-md mb-4">Failed to submit audit. Please try again.</p>`;
+                        console.error("Firestore submission error:", err);
+                    } finally {
+                        submitButton.disabled = false;
+                        submitButton.textContent = 'Submit Audit';
+                    }
+                });
+            }
+        };
+
+        App.init();
+    </script>
+</body>
+</html>
