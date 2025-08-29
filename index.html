@@ -69,6 +69,15 @@
                 currentUser: null,
                 currentPage: 'dashboard',
                 selectedAuditor: null,
+                selectedSupervisor: null,
+                selectedAgent: null,
+                viewRole: 'analyst',
+                timeFilter: 'monthly', // Default to monthly
+                auditTypeFilter: 'all',
+                audits: [], // Data is now fetched from Google Sheets
+                selectedMonth: new Date().getMonth(), // 0-11
+                selectedYear: new Date().getFullYear(),
+                chartInstance: null,
             },
 
             // --- User Data ---
@@ -97,6 +106,7 @@
                 { uid: 'subhojit_das_s8', name: 'Subhojit Das', teamId: 'team_subhojit' },
                 { uid: 'tuhin_giri_s9', name: 'Tuhin Giri', teamId: 'team_tuhin' },
             ],
+            allAgents: [],
             scoringParameters: [
                 { id: 'timelyManner', text: "Did the agent respond to the player in a timely manner?", points: 10, partialPoints: 5 },
                 { id: 'securityProtocols', text: "Did the agent follow proper security and account verification protocols?", points: 10, partialPoints: 5 },
@@ -112,7 +122,10 @@
 
             // --- Initialization ---
             init() {
+                this.allAgents = [...new Set(this.qualityAuditors.flatMap(auditor => auditor.agents))].sort();
                 this.state.selectedAuditor = this.qualityAuditors[0];
+                this.state.selectedSupervisor = this.supervisors[0];
+                this.state.selectedAgent = this.allAgents[0];
                 this.initLogin();
                 
                 if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -125,7 +138,7 @@
             // --- UI & Event Handling ---
             initTheme() {
                 const themeToggle = document.getElementById('theme-toggle');
-                if (!themeToggle) return;
+                if (!themeToggle) return; // Safeguard
                 const lightIcon = document.getElementById('theme-icon-light');
                 const darkIcon = document.getElementById('theme-icon-dark');
                 
@@ -143,6 +156,7 @@
                     document.documentElement.classList.toggle('dark');
                     localStorage.theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
                     apply();
+                    this.render(); // Re-render chart with new theme colors
                 });
                 apply();
             },
@@ -161,6 +175,7 @@
                         if (user.auditorId) {
                             this.state.selectedAuditor = this.qualityAuditors.find(qa => qa.uid === user.auditorId) || this.qualityAuditors[0];
                         }
+                        
                         document.getElementById('login-page').classList.add('hidden');
                         document.getElementById('app-container').classList.remove('hidden');
                         
@@ -176,7 +191,7 @@
             initNavigation() {
                 const navbar = document.getElementById('navbar');
                 navbar.innerHTML = this.getNavbarHTML();
-                this.initTheme();
+                this.initTheme(); // Init theme toggle after navbar is rendered
                 navbar.addEventListener('click', (e) => {
                     const navButton = e.target.closest('[data-nav]');
                     const logoutButton = e.target.closest('#logout-btn');
@@ -191,6 +206,7 @@
             
             logout() {
                 this.state.currentUser = null;
+                this.state.audits = []; // Clear data on logout
                 document.getElementById('login-page').classList.remove('hidden');
                 document.getElementById('app-container').classList.add('hidden');
                 document.getElementById('login-form').reset();
@@ -210,9 +226,102 @@
                 const content = document.getElementById('page-content');
                 if (this.state.currentPage === 'dashboard') {
                     content.innerHTML = this.getDashboardHTML();
+                    this.attachDashboardListeners();
+                    this.fetchAuditsFromSheet();
                 } else if (this.state.currentPage === 'audit') {
                     content.innerHTML = this.getAuditFormHTML();
                     this.attachAuditFormListeners();
+                }
+            },
+
+            exportToCSV() {
+                if (this.state.audits.length === 0) {
+                    alert("No audit data to export.");
+                    return;
+                }
+
+                const headers = ['AuditDate', 'AuditorName', 'AgentName', 'TeamID', 'ChatID', 'AuditType', 'TotalScore', 'ContactReason', 'CoachingArea', 'CoachingComments', 'Remarks'];
+                const scoringHeaders = this.scoringParameters.map(p => p.id);
+                const allHeaders = [...headers, ...scoringHeaders];
+
+                let csvContent = "data:text/csv;charset=utf-8," + allHeaders.join(",") + "\n";
+
+                this.state.audits.forEach(audit => {
+                    const row = [
+                        new Date(audit.auditDate).toLocaleString(),
+                        `"${audit.auditorName}"`,
+                        `"${audit.agentName}"`,
+                        `"${audit.teamId}"`,
+                        `"${audit.chatId}"`,
+                        `"${audit.auditType}"`,
+                        audit.totalScore,
+                        `"${(audit.contactReason || []).join('; ')}"`,
+                        `"${audit.coachingArea || ''}"`,
+                        `"${(audit.coachingComments || '').replace(/"/g, '""')}"`,
+                        `"${(audit.remarks || '').replace(/"/g, '""')}"`,
+                    ];
+                    
+                    scoringHeaders.forEach(sh => {
+                        row.push(`"${audit.scores[sh] || 'N/A'}"`);
+                    });
+
+                    csvContent += row.join(",") + "\n";
+                });
+
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "audit_export.csv");
+                document.body.appendChild(link); 
+                link.click();
+                document.body.removeChild(link);
+            },
+            
+            async fetchAuditsFromSheet() {
+                const GOOGLE_SHEET_CSV_URL = 'YOUR_PUBLISHED_GOOGLE_SHEET_CSV_URL';
+                if (GOOGLE_SHEET_CSV_URL === 'YOUR_PUBLISHED_GOOGLE_SHEET_CSV_URL') {
+                    console.warn("Google Sheet URL is not set. Dashboard will not show data.");
+                    return;
+                }
+
+                try {
+                    const response = await fetch(GOOGLE_SHEET_CSV_URL);
+                    const csvText = await response.text();
+                    const rows = csvText.split('\n').slice(1); // Skip header row
+                    
+                    const audits = rows.map(row => {
+                        const columns = row.split(',');
+                        // Note: This mapping depends on the exact order of columns in your Google Sheet
+                        return {
+                            auditDate: new Date(columns[0]),
+                            auditorName: columns[1],
+                            agentName: columns[2],
+                            teamId: columns[3],
+                            chatId: columns[4],
+                            auditType: columns[5],
+                            contactReason: columns[6].split(';'),
+                            coachingArea: columns[7],
+                            coachingComments: columns[8],
+                            remarks: columns[9],
+                            totalScore: parseFloat(columns[10]),
+                            scores: {
+                                timelyManner: columns[11],
+                                securityProtocols: columns[12],
+                                professionalInteraction: columns[13],
+                                empathy: columns[14],
+                                understandAndRespond: columns[15],
+                                interactionProcedures: columns[16],
+                                resolveIssue: columns[17],
+                                upsell: columns[18],
+                                thankPlayer: columns[19],
+                                satisfied: columns[20],
+                            }
+                        };
+                    });
+                    this.state.audits = audits.filter(a => a.auditDate instanceof Date && !isNaN(a.auditDate)); // Filter out invalid rows
+                    this.render();
+                } catch (error) {
+                    console.error("Error fetching or parsing sheet data:", error);
                 }
             },
 
@@ -240,18 +349,194 @@
             },
 
             getDashboardHTML() {
+                // Filter by role first
+                let roleFilteredAudits = this.state.audits;
+                if (this.state.viewRole === 'supervisor') {
+                    roleFilteredAudits = this.state.audits.filter(a => a.teamId === this.state.selectedSupervisor.teamId);
+                } else if (this.state.viewRole === 'agent') {
+                    roleFilteredAudits = this.state.audits.filter(a => a.agentName === this.state.selectedAgent);
+                } else { // analyst
+                    roleFilteredAudits = this.state.audits.filter(a => a.auditorName === this.state.selectedAuditor.name);
+                }
+
+                // Filter by audit type
+                let typeFilteredAudits = roleFilteredAudits;
+                if(this.state.auditTypeFilter !== 'all'){
+                    typeFilteredAudits = roleFilteredAudits.filter(a => a.auditType === this.state.auditTypeFilter);
+                }
+
+                // Filter by time
+                const now = new Date();
+                const filteredAudits = typeFilteredAudits.filter(audit => {
+                    const auditDate = new Date(audit.auditDate); // Use date object from local data
+                    if (this.state.timeFilter === 'daily') return auditDate.toDateString() === now.toDateString();
+                    if (this.state.timeFilter === 'weekly') return auditDate >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+                    if (this.state.timeFilter === 'monthly') return auditDate.getMonth() === this.state.selectedMonth && auditDate.getFullYear() === this.state.selectedYear;
+                    return true;
+                });
+
+                const totalAudits = filteredAudits.length;
+                const avgScore = totalAudits > 0 ? (filteredAudits.reduce((sum, a) => sum + a.totalScore, 0) / totalAudits).toFixed(2) : 0;
+                
+                const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                const yearOptions = [new Date().getFullYear() -1, new Date().getFullYear(), new Date().getFullYear() + 1].map(y => `<option value="${y}" ${this.state.selectedYear === y ? 'selected' : ''}>${y}</option>`).join('');
+                const monthOptions = monthNames.map((m, i) => `<option value="${i}" ${this.state.selectedMonth === i ? 'selected' : ''}>${m}</option>`).join('');
+
                 return `
                     <div class="space-y-8">
                         <div class="flex flex-wrap justify-between items-center gap-4">
                             <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-200">Dashboard</h1>
+                            <div class="flex items-center gap-4 flex-wrap">
+                                <button id="export-csv-btn" class="bg-green-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-green-700">Export to CSV</button>
+                                <div class="flex space-x-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm" data-group="auditTypeFilter">${['all', 'internal', 'external'].map(f => `<button data-filter="${f}" class="px-4 py-1 rounded-md text-sm capitalize ${this.state.auditTypeFilter === f ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-300'}">${f}</button>`).join('')}</div>
+                                <div class="flex space-x-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm" data-group="timeFilter">${['daily', 'weekly', 'monthly'].map(f => `<button data-filter="${f}" class="px-4 py-1 rounded-md text-sm capitalize ${this.state.timeFilter === f ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-300'}">${f}</button>`).join('')}</div>
+                                <div class="flex items-center gap-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm">
+                                    <select id="month-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-1.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white">${monthOptions}</select>
+                                    <select id="year-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-1.5 dark:bg-gray-700 dark:border-gray-600 dark:text-white">${yearOptions}</select>
+                                </div>
+                            </div>
                         </div>
-                        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg">
-                            <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">Audit Data</h3>
-                            <p class="text-gray-600 dark:text-gray-400">
-                                All submitted audit data is now being saved directly to your Google Sheet. Please check your sheet to view the reports and analyze the data.
-                            </p>
+                        <div class="flex space-x-2 bg-white dark:bg-gray-800 p-2 rounded-lg shadow-sm" data-group="viewRole">
+                            <button data-role="analyst" class="flex-1 px-4 py-2 rounded-md text-sm font-semibold ${this.state.viewRole === 'analyst' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700'}">Quality Analyst</button>
+                            <button data-role="supervisor" class="flex-1 px-4 py-2 rounded-md text-sm font-semibold ${this.state.viewRole === 'supervisor' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700'}">Supervisor</button>
+                            <button data-role="agent" class="flex-1 px-4 py-2 rounded-md text-sm font-semibold ${this.state.viewRole === 'agent' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-200 bg-gray-200 dark:bg-gray-700'}">Agent</button>
                         </div>
+                        <div id="selector-container"></div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg flex items-center"><div class="bg-blue-100 dark:bg-blue-900/50 p-3 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500 dark:text-blue-400 h-6 w-6"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg></div><div class="ml-4"><p class="text-gray-500 dark:text-gray-400 text-sm">Total Audits</p><p class="text-2xl font-bold text-gray-800 dark:text-gray-200">${totalAudits}</p></div></div><div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg flex items-center"><div class="bg-green-100 dark:bg-green-900/50 p-3 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 dark:text-green-400 h-6 w-6"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg></div><div class="ml-4"><p class="text-gray-500 dark:text-gray-400 text-sm">Average Score</p><p class="text-2xl font-bold text-gray-800 dark:text-gray-200">${avgScore}%</p></div></div></div>
+                        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg"><h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">Team Performance</h3><div class="h-[300px]"><canvas id="performance-chart"></canvas></div></div>
+                        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg"><h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-4">Recent Audits</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500 dark:text-gray-400"><thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400"><tr><th scope="col" class="px-6 py-3">Agent</th><th scope="col" class="px-6 py-3">Team</th><th scope="col" class="px-6 py-3">Audit Date</th><th scope="col" class="px-6 py-3">Type</th><th scope="col" class="px-6 py-3">Score</th><th scope="col" class="px-6 py-3">Auditor</th></tr></thead><tbody>${filteredAudits.length > 0 ? filteredAudits.map(audit => `
+                            <tr class="bg-white dark:bg-gray-800 border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600"><td class="px-6 py-4 font-medium text-gray-900 dark:text-white">${audit.agentName}</td><td class="px-6 py-4">${audit.teamId}</td><td class="px-6 py-4">${new Date(audit.auditDate).toLocaleDateString()}</td><td class="px-6 py-4 capitalize">${audit.auditType}</td><td class="px-6 py-4">${audit.totalScore}%</td><td class="px-6 py-4">${audit.auditorName}</td></tr>`).join('') : `<tr><td colspan="6" class="text-center text-gray-500 py-4">No audits found.</td></tr>`}</tbody></table></div></div>
                     </div>`;
+            },
+            
+            attachDashboardListeners() {
+                const content = document.getElementById('page-content');
+                content.addEventListener('click', (e) => {
+                    const button = e.target.closest('button');
+                    if (!button) return;
+
+                    const group = button.parentElement.dataset.group;
+                    if (group === 'auditTypeFilter') {
+                        this.state.auditTypeFilter = button.dataset.filter;
+                        this.render();
+                    } else if (group === 'timeFilter') {
+                        this.state.timeFilter = button.dataset.filter;
+                        const now = new Date();
+                        this.state.selectedMonth = now.getMonth();
+                        this.state.selectedYear = now.getFullYear();
+                        this.render();
+                    } else if (group === 'viewRole') {
+                        this.state.viewRole = button.dataset.role;
+                        this.render();
+                    }
+                });
+                
+                document.getElementById('month-select').addEventListener('change', (e) => {
+                    this.state.selectedMonth = parseInt(e.target.value);
+                    this.state.timeFilter = 'monthly';
+                    this.render();
+                });
+                document.getElementById('year-select').addEventListener('change', (e) => {
+                    this.state.selectedYear = parseInt(e.target.value);
+                    this.state.timeFilter = 'monthly';
+                    this.render();
+                });
+
+                const selectorContainer = document.getElementById('selector-container');
+                if (this.state.viewRole === 'analyst') {
+                    selectorContainer.innerHTML = `<div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm"><label for="auditor-select" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Auditor:</label><select id="auditor-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">${this.qualityAuditors.map(a => `<option value="${a.uid}" ${a.uid === this.state.selectedAuditor.uid ? 'selected' : ''}>${a.name}</option>`).join('')}</select></div>`;
+                    document.getElementById('auditor-select').addEventListener('change', (e) => {
+                        this.state.selectedAuditor = this.qualityAuditors.find(a => a.uid === e.target.value);
+                        this.render();
+                    });
+                } else if (this.state.viewRole === 'supervisor') {
+                    selectorContainer.innerHTML = `<div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm"><label for="supervisor-select" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Supervisor:</label><select id="supervisor-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">${this.supervisors.map(s => `<option value="${s.uid}" ${s.uid === this.state.selectedSupervisor.uid ? 'selected' : ''}>${s.name}</option>`).join('')}</select></div>`;
+                    document.getElementById('supervisor-select').addEventListener('change', (e) => {
+                        this.state.selectedSupervisor = this.supervisors.find(s => s.uid === e.target.value);
+                        this.render();
+                    });
+                } else if (this.state.viewRole === 'agent') {
+                    selectorContainer.innerHTML = `<div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm"><label for="agent-select" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Select Agent:</label><select id="agent-select" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white">${this.allAgents.map(name => `<option value="${name}" ${name === this.state.selectedAgent ? 'selected' : ''}>${name}</option>`).join('')}</select></div>`;
+                    document.getElementById('agent-select').addEventListener('change', (e) => {
+                        this.state.selectedAgent = e.target.value;
+                        this.render();
+                    });
+                }
+                document.getElementById('export-csv-btn').addEventListener('click', () => this.exportToCSV());
+                this.renderChart();
+            },
+
+            renderChart() {
+                const ctx = document.getElementById('performance-chart');
+                if (!ctx) return;
+
+                if (this.state.chartInstance) {
+                    this.state.chartInstance.destroy();
+                }
+
+                // Recalculate filtered audits for the chart
+                let roleFilteredAudits = this.state.audits;
+                if (this.state.viewRole === 'supervisor') roleFilteredAudits = this.state.audits.filter(a => a.teamId === this.state.selectedSupervisor.teamId);
+                else if (this.state.viewRole === 'agent') roleFilteredAudits = this.state.audits.filter(a => a.agentName === this.state.selectedAgent);
+                else roleFilteredAudits = this.state.audits.filter(a => a.auditorName === this.state.selectedAuditor.name);
+                
+                let typeFilteredAudits = roleFilteredAudits;
+                if(this.state.auditTypeFilter !== 'all') typeFilteredAudits = roleFilteredAudits.filter(a => a.auditType === this.state.auditTypeFilter);
+                
+                const now = new Date();
+                const filteredAudits = typeFilteredAudits.filter(audit => {
+                    const auditDate = new Date(audit.auditDate);
+                    if (this.state.timeFilter === 'daily') return auditDate.toDateString() === now.toDateString();
+                    if (this.state.timeFilter === 'weekly') return auditDate >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+                    if (this.state.timeFilter === 'monthly') return auditDate.getMonth() === this.state.selectedMonth && auditDate.getFullYear() === this.state.selectedYear;
+                    return true;
+                });
+
+                const agentScores = filteredAudits.reduce((acc, audit) => {
+                    acc[audit.agentName] = acc[audit.agentName] || { totalScore: 0, count: 0 };
+                    acc[audit.agentName].totalScore += audit.totalScore;
+                    acc[audit.agentName].count++;
+                    return acc;
+                }, {});
+
+                const labels = Object.keys(agentScores);
+                const data = labels.map(label => (agentScores[label].totalScore / agentScores[label].count).toFixed(2));
+                const isDark = document.documentElement.classList.contains('dark');
+
+                this.state.chartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Average Score',
+                            data: data,
+                            backgroundColor: 'rgba(79, 70, 229, 0.8)',
+                            borderColor: 'rgba(79, 70, 229, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                grid: { color: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' },
+                                ticks: { color: isDark ? '#9ca3af' : '#4b5563' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: isDark ? '#9ca3af' : '#4b5563' }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                labels: { color: isDark ? '#9ca3af' : '#4b5563' }
+                            }
+                        }
+                    }
+                });
             },
 
             getAuditFormHTML() {
@@ -266,8 +551,8 @@
                         <section>
                             <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b pb-2 dark:border-gray-600">Case Details</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Auditor Name</label><input type="text" name="entry.auditorName" value="${currentAuditor.name}" readonly class="w-full px-3 py-2 border rounded-md bg-gray-200 dark:bg-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-500" /></div>
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Agent Name</label><select name="entry.agentName" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select an Agent</option>${agentOptions}</select></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Auditor Name</label><select name="entry.auditorName" id="auditor-name-select" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">${this.qualityAuditors.map(a => `<option value="${a.name}" data-uid="${a.uid}" ${a.uid === this.state.selectedAuditor.uid ? 'selected' : ''}>${a.name}</option>`).join('')}</select></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Agent Name</label><select name="entry.agentName" id="agent-name-select" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select an Agent</option>${agentOptions}</select></div>
                                 <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Team (Supervisor)</label><select name="entry.teamId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select a Team</option>${this.supervisors.map(s => `<option value="${s.teamId}">${s.name}</option>`).join('')}</select></div>
                                 <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Chat ID / Customer ID</label><input type="text" name="entry.chatId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
                                 <div class="md:col-span-2"><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Audit Type</label><div class="flex items-center space-x-6"><label class="flex items-center cursor-pointer"><input type="radio" name="entry.auditType" value="internal" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">Internal</span></label><label class="flex items-center cursor-pointer"><input type="radio" name="entry.auditType" value="external" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">External</span></label></div></div>
@@ -302,6 +587,18 @@
             },
 
             attachAuditFormListeners() {
+                const auditorSelect = document.getElementById('auditor-name-select');
+                const agentSelect = document.getElementById('agent-name-select');
+
+                auditorSelect.addEventListener('change', (e) => {
+                    const selectedAuditorUid = e.target.selectedOptions[0].dataset.uid;
+                    const selectedAuditor = this.qualityAuditors.find(a => a.uid === selectedAuditorUid);
+                    this.state.selectedAuditor = selectedAuditor;
+                    
+                    const agentOptions = selectedAuditor.agents.map(agent => `<option value="${agent}">${agent}</option>`).join('');
+                    agentSelect.innerHTML = `<option value="">Select an Agent</option>${agentOptions}`;
+                });
+
                 document.getElementById('audit-form').addEventListener('submit', async (e) => {
                     e.preventDefault();
                     const form = e.target;
