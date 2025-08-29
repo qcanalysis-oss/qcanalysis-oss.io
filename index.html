@@ -74,7 +74,7 @@
                 viewRole: 'analyst',
                 timeFilter: 'monthly', // Default to monthly
                 auditTypeFilter: 'all',
-                audits: [], // Data is now fetched from Google Sheets
+                audits: [], // Data is now fetched from the online sheet
                 selectedMonth: new Date().getMonth(), // 0-11
                 selectedYear: new Date().getFullYear(),
                 chartInstance: null,
@@ -138,7 +138,7 @@
             // --- UI & Event Handling ---
             initTheme() {
                 const themeToggle = document.getElementById('theme-toggle');
-                if (!themeToggle) return; // Safeguard
+                if (!themeToggle) return;
                 const lightIcon = document.getElementById('theme-icon-light');
                 const darkIcon = document.getElementById('theme-icon-dark');
                 
@@ -156,7 +156,7 @@
                     document.documentElement.classList.toggle('dark');
                     localStorage.theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
                     apply();
-                    this.render(); // Re-render chart with new theme colors
+                    this.render(); 
                 });
                 apply();
             },
@@ -191,7 +191,7 @@
             initNavigation() {
                 const navbar = document.getElementById('navbar');
                 navbar.innerHTML = this.getNavbarHTML();
-                this.initTheme(); // Init theme toggle after navbar is rendered
+                this.initTheme(); 
                 navbar.addEventListener('click', (e) => {
                     const navButton = e.target.closest('[data-nav]');
                     const logoutButton = e.target.closest('#logout-btn');
@@ -206,7 +206,7 @@
             
             logout() {
                 this.state.currentUser = null;
-                this.state.audits = []; // Clear data on logout
+                this.state.audits = []; 
                 document.getElementById('login-page').classList.remove('hidden');
                 document.getElementById('app-container').classList.add('hidden');
                 document.getElementById('login-form').reset();
@@ -233,93 +233,33 @@
                     this.attachAuditFormListeners();
                 }
             },
-
-            exportToCSV() {
-                if (this.state.audits.length === 0) {
-                    alert("No audit data to export.");
-                    return;
-                }
-
-                const headers = ['AuditDate', 'AuditorName', 'AgentName', 'TeamID', 'ChatID', 'AuditType', 'TotalScore', 'ContactReason', 'CoachingArea', 'CoachingComments', 'Remarks'];
-                const scoringHeaders = this.scoringParameters.map(p => p.id);
-                const allHeaders = [...headers, ...scoringHeaders];
-
-                let csvContent = "data:text/csv;charset=utf-8," + allHeaders.join(",") + "\n";
-
-                this.state.audits.forEach(audit => {
-                    const row = [
-                        new Date(audit.auditDate).toLocaleString(),
-                        `"${audit.auditorName}"`,
-                        `"${audit.agentName}"`,
-                        `"${audit.teamId}"`,
-                        `"${audit.chatId}"`,
-                        `"${audit.auditType}"`,
-                        audit.totalScore,
-                        `"${(audit.contactReason || []).join('; ')}"`,
-                        `"${audit.coachingArea || ''}"`,
-                        `"${(audit.coachingComments || '').replace(/"/g, '""')}"`,
-                        `"${(audit.remarks || '').replace(/"/g, '""')}"`,
-                    ];
-                    
-                    scoringHeaders.forEach(sh => {
-                        row.push(`"${audit.scores[sh] || 'N/A'}"`);
-                    });
-
-                    csvContent += row.join(",") + "\n";
-                });
-
-                const encodedUri = encodeURI(csvContent);
-                const link = document.createElement("a");
-                link.setAttribute("href", encodedUri);
-                link.setAttribute("download", "audit_export.csv");
-                document.body.appendChild(link); 
-                link.click();
-                document.body.removeChild(link);
-            },
             
             async fetchAuditsFromSheet() {
-                const GOOGLE_SHEET_CSV_URL = 'YOUR_PUBLISHED_GOOGLE_SHEET_CSV_URL';
-                if (GOOGLE_SHEET_CSV_URL === 'YOUR_PUBLISHED_GOOGLE_SHEET_CSV_URL') {
-                    console.warn("Google Sheet URL is not set. Dashboard will not show data.");
+                const SHEETDB_URL = 'https://sheetdb.io/api/v1/a28cckb99uve7';
+                if (SHEETDB_URL === 'YOUR_SHEETDB_API_URL') {
+                    console.warn("SheetDB URL is not set. Dashboard will not show data.");
                     return;
                 }
 
                 try {
-                    const response = await fetch(GOOGLE_SHEET_CSV_URL);
-                    const csvText = await response.text();
-                    const rows = csvText.split('\n').slice(1); // Skip header row
+                    const response = await fetch(SHEETDB_URL);
+                    const data = await response.json();
                     
-                    const audits = rows.map(row => {
-                        const columns = row.split(',');
-                        // Note: This mapping depends on the exact order of columns in your Google Sheet
-                        return {
-                            auditDate: new Date(columns[0]),
-                            auditorName: columns[1],
-                            agentName: columns[2],
-                            teamId: columns[3],
-                            chatId: columns[4],
-                            auditType: columns[5],
-                            contactReason: columns[6].split(';'),
-                            coachingArea: columns[7],
-                            coachingComments: columns[8],
-                            remarks: columns[9],
-                            totalScore: parseFloat(columns[10]),
-                            scores: {
-                                timelyManner: columns[11],
-                                securityProtocols: columns[12],
-                                professionalInteraction: columns[13],
-                                empathy: columns[14],
-                                understandAndRespond: columns[15],
-                                interactionProcedures: columns[16],
-                                resolveIssue: columns[17],
-                                upsell: columns[18],
-                                thankPlayer: columns[19],
-                                satisfied: columns[20],
-                            }
-                        };
-                    });
-                    this.state.audits = audits.filter(a => a.auditDate instanceof Date && !isNaN(a.auditDate)); // Filter out invalid rows
-                    this.render();
+                    this.state.audits = data.map(audit => ({
+                        ...audit,
+                        totalScore: parseFloat(audit.totalScore),
+                        auditDate: new Date(audit.Timestamp)
+                    })).filter(a => a.auditDate instanceof Date && !isNaN(a.auditDate));
+                    
+                    // Re-render only the dashboard part after fetching
+                    if(this.state.currentPage === 'dashboard') {
+                       const dashboardContent = document.getElementById('page-content');
+                       if(dashboardContent) {
+                            dashboardContent.innerHTML = this.getDashboardHTML();
+                            this.attachDashboardListeners();
+                       }
+                    }
+
                 } catch (error) {
                     console.error("Error fetching or parsing sheet data:", error);
                 }
@@ -349,7 +289,6 @@
             },
 
             getDashboardHTML() {
-                // Filter by role first
                 let roleFilteredAudits = this.state.audits;
                 if (this.state.viewRole === 'supervisor') {
                     roleFilteredAudits = this.state.audits.filter(a => a.teamId === this.state.selectedSupervisor.teamId);
@@ -359,16 +298,14 @@
                     roleFilteredAudits = this.state.audits.filter(a => a.auditorName === this.state.selectedAuditor.name);
                 }
 
-                // Filter by audit type
                 let typeFilteredAudits = roleFilteredAudits;
                 if(this.state.auditTypeFilter !== 'all'){
                     typeFilteredAudits = roleFilteredAudits.filter(a => a.auditType === this.state.auditTypeFilter);
                 }
 
-                // Filter by time
                 const now = new Date();
                 const filteredAudits = typeFilteredAudits.filter(audit => {
-                    const auditDate = new Date(audit.auditDate); // Use date object from local data
+                    const auditDate = new Date(audit.auditDate);
                     if (this.state.timeFilter === 'daily') return auditDate.toDateString() === now.toDateString();
                     if (this.state.timeFilter === 'weekly') return auditDate >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
                     if (this.state.timeFilter === 'monthly') return auditDate.getMonth() === this.state.selectedMonth && auditDate.getFullYear() === this.state.selectedYear;
@@ -387,7 +324,6 @@
                         <div class="flex flex-wrap justify-between items-center gap-4">
                             <h1 class="text-3xl font-bold text-gray-800 dark:text-gray-200">Dashboard</h1>
                             <div class="flex items-center gap-4 flex-wrap">
-                                <button id="export-csv-btn" class="bg-green-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-green-700">Export to CSV</button>
                                 <div class="flex space-x-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm" data-group="auditTypeFilter">${['all', 'internal', 'external'].map(f => `<button data-filter="${f}" class="px-4 py-1 rounded-md text-sm capitalize ${this.state.auditTypeFilter === f ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-300'}">${f}</button>`).join('')}</div>
                                 <div class="flex space-x-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm" data-group="timeFilter">${['daily', 'weekly', 'monthly'].map(f => `<button data-filter="${f}" class="px-4 py-1 rounded-md text-sm capitalize ${this.state.timeFilter === f ? 'bg-indigo-600 text-white' : 'text-gray-600 dark:text-gray-300'}">${f}</button>`).join('')}</div>
                                 <div class="flex items-center gap-2 bg-white dark:bg-gray-800 p-1 rounded-lg shadow-sm">
@@ -462,7 +398,7 @@
                         this.render();
                     });
                 }
-                document.getElementById('export-csv-btn').addEventListener('click', () => this.exportToCSV());
+                
                 this.renderChart();
             },
 
@@ -474,7 +410,6 @@
                     this.state.chartInstance.destroy();
                 }
 
-                // Recalculate filtered audits for the chart
                 let roleFilteredAudits = this.state.audits;
                 if (this.state.viewRole === 'supervisor') roleFilteredAudits = this.state.audits.filter(a => a.teamId === this.state.selectedSupervisor.teamId);
                 else if (this.state.viewRole === 'agent') roleFilteredAudits = this.state.audits.filter(a => a.agentName === this.state.selectedAgent);
@@ -551,12 +486,12 @@
                         <section>
                             <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b pb-2 dark:border-gray-600">Case Details</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Auditor Name</label><select name="entry.auditorName" id="auditor-name-select" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">${this.qualityAuditors.map(a => `<option value="${a.name}" data-uid="${a.uid}" ${a.uid === this.state.selectedAuditor.uid ? 'selected' : ''}>${a.name}</option>`).join('')}</select></div>
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Agent Name</label><select name="entry.agentName" id="agent-name-select" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select an Agent</option>${agentOptions}</select></div>
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Team (Supervisor)</label><select name="entry.teamId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select a Team</option>${this.supervisors.map(s => `<option value="${s.teamId}">${s.name}</option>`).join('')}</select></div>
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Chat ID / Customer ID</label><input type="text" name="entry.chatId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
-                                <div class="md:col-span-2"><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Audit Type</label><div class="flex items-center space-x-6"><label class="flex items-center cursor-pointer"><input type="radio" name="entry.auditType" value="internal" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">Internal</span></label><label class="flex items-center cursor-pointer"><input type="radio" name="entry.auditType" value="external" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">External</span></label></div></div>
-                                <div class="md:col-span-2"><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Contact Reason</label><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${['Deposit', 'Withdraw', 'Promotions', 'Accounts', 'Games'].map(reason => `<label class="flex items-center"><input type="checkbox" name="entry.contactReason" value="${reason}" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">${reason}</span></label>`).join('')}</div></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Auditor Name</label><select name="auditorName" id="auditor-name-select" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">${this.qualityAuditors.map(a => `<option value="${a.name}" data-uid="${a.uid}" ${a.uid === this.state.selectedAuditor.uid ? 'selected' : ''}>${a.name}</option>`).join('')}</select></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Agent Name</label><select name="agentName" id="agent-name-select" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select an Agent</option>${agentOptions}</select></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Team (Supervisor)</label><select name="teamId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><option value="">Select a Team</option>${this.supervisors.map(s => `<option value="${s.teamId}">${s.name}</option>`).join('')}</select></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">Chat ID / Customer ID</label><input type="text" name="chatId" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required /></div>
+                                <div class="md:col-span-2"><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Audit Type</label><div class="flex items-center space-x-6"><label class="flex items-center cursor-pointer"><input type="radio" name="auditType" value="internal" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">Internal</span></label><label class="flex items-center cursor-pointer"><input type="radio" name="auditType" value="external" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">External</span></label></div></div>
+                                <div class="md:col-span-2"><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Contact Reason</label><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${['Deposit', 'Withdraw', 'Promotions', 'Accounts', 'Games'].map(reason => `<label class="flex items-center"><input type="checkbox" name="contactReason" value="${reason}" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">${reason}</span></label>`).join('')}</div></div>
                             </div>
                         </section>
                         <section>
@@ -565,10 +500,10 @@
                                 <div class="p-4 rounded-md bg-gray-50 dark:bg-gray-700/50">
                                     <label class="block text-gray-800 dark:text-gray-200 font-medium">${param.text} <span class="text-sm font-normal text-gray-500 dark:text-gray-400">(${param.points} points)</span></label>
                                     <div class="flex items-center space-x-6 mt-2">
-                                        <label class="flex items-center cursor-pointer"><input type="radio" name="entry.${param.id}" value="yes" class="h-4 w-4 text-green-600 border-gray-300 focus:ring-green-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">Yes</span></label>
-                                        <label class="flex items-center cursor-pointer"><input type="radio" name="entry.${param.id}" value="no" class="h-4 w-4 text-red-600 border-gray-300 focus:ring-red-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">No</span></label>
-                                        ${param.partialPoints ? `<label class="flex items-center cursor-pointer"><input type="radio" name="entry.${param.id}" value="partial" class="h-4 w-4 text-yellow-500 border-gray-300 focus:ring-yellow-400" /><span class="ml-2 text-gray-700 dark:text-gray-300">Partial (${param.partialPoints} pts)</span></label>` : ''}
-                                        <label class="flex items-center cursor-pointer"><input type="radio" name="entry.${param.id}" value="na" checked class="h-4 w-4 text-gray-500 border-gray-300 focus:ring-gray-400" /><span class="ml-2 text-gray-700 dark:text-gray-300">N/A</span></label>
+                                        <label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="yes" class="h-4 w-4 text-green-600 border-gray-300 focus:ring-green-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">Yes</span></label>
+                                        <label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="no" class="h-4 w-4 text-red-600 border-gray-300 focus:ring-red-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">No</span></label>
+                                        ${param.partialPoints ? `<label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="partial" class="h-4 w-4 text-yellow-500 border-gray-300 focus:ring-yellow-400" /><span class="ml-2 text-gray-700 dark:text-gray-300">Partial (${param.partialPoints} pts)</span></label>` : ''}
+                                        <label class="flex items-center cursor-pointer"><input type="radio" name="${param.id}" value="na" checked class="h-4 w-4 text-gray-500 border-gray-300 focus:ring-gray-400" /><span class="ml-2 text-gray-700 dark:text-gray-300">N/A</span></label>
                                     </div>
                                 </div>`).join('')}
                             </div>
@@ -576,9 +511,9 @@
                         <section>
                              <h3 class="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4 border-b pb-2 dark:border-gray-600">Coaching & Feedback</h3>
                             <div class="space-y-4">
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Please select on what the agent needs to be coached at.</label><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${['Chat Handling', 'Product knowledge', 'Process Adherence', 'Communication Style', 'Others'].map(area => `<label class="flex items-center"><input type="radio" name="entry.coachingArea" value="${area}" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">${area}</span></label>`).join('')}</div></div>
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">If "Others" please elaborate.</label><textarea name="entry.coachingComments" rows="3" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea></div>
-                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">General Remarks & Feedback</label><textarea name="entry.remarks" rows="4" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-2">Please select on what the agent needs to be coached at.</label><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">${['Chat Handling', 'Product knowledge', 'Process Adherence', 'Communication Style', 'Others'].map(area => `<label class="flex items-center"><input type="radio" name="coachingArea" value="${area}" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500" /><span class="ml-2 text-gray-700 dark:text-gray-300">${area}</span></label>`).join('')}</div></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">If "Others" please elaborate.</label><textarea name="coachingComments" rows="3" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea></div>
+                                <div><label class="block text-gray-700 dark:text-gray-300 font-medium mb-1">General Remarks & Feedback</label><textarea name="remarks" rows="4" class="w-full px-3 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea></div>
                             </div>
                         </section>
                         <div class="text-right pt-4"><button type="submit" id="submit-audit" class="bg-indigo-600 text-white font-bold py-2 px-6 rounded-md hover:bg-indigo-700 disabled:bg-indigo-300 transition duration-300">Submit Audit</button></div>
@@ -606,27 +541,51 @@
                     const formMessages = document.getElementById('form-messages');
                     const submitButton = document.getElementById('submit-audit');
                     
-                    const GOOGLE_FORM_ACTION_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdHhAeW_WfwXaA9laD4Ef4eiC_SxFL59fcGXfYR8y7tJni63w/formResponse';
+                    const SHEETDB_URL = 'https://sheetdb.io/api/v1/a28cckb99uve7';
+                    if (SHEETDB_URL === 'YOUR_SHEETDB_API_URL') {
+                         formMessages.innerHTML = `<p class="bg-red-100 text-red-700 p-3 rounded-md mb-4">Error: SheetDB URL not configured.</p>`;
+                         return;
+                    }
 
-                    // Manually add total score to form data
+                    submitButton.disabled = true;
+                    submitButton.textContent = 'Submitting...';
+                    
                     let totalScore = 0;
+                    const dataToSubmit = {};
                     this.scoringParameters.forEach(param => {
-                        const value = formData.get(`entry.${param.id}`);
+                        const value = formData.get(param.id);
+                        dataToSubmit[param.id] = value;
                         if (value === 'yes') totalScore += param.points;
                         if (value === 'partial') totalScore += param.partialPoints || 0;
                     });
-                    formData.append('entry.totalScore', totalScore);
                     
-                    submitButton.disabled = true;
-                    submitButton.textContent = 'Submitting...';
+                    dataToSubmit.Timestamp = new Date().toISOString();
+                    dataToSubmit.auditorName = formData.get('auditorName');
+                    dataToSubmit.agentName = formData.get('agentName');
+                    dataToSubmit.teamId = formData.get('teamId');
+                    dataToSubmit.chatId = formData.get('chatId');
+                    dataToSubmit.auditType = formData.get('auditType');
+                    dataToSubmit.contactReason = formData.getAll('contactReason').join(', ');
+                    dataToSubmit.coachingArea = formData.get('coachingArea');
+                    dataToSubmit.coachingComments = formData.get('coachingComments');
+                    dataToSubmit.remarks = formData.get('remarks');
+                    dataToSubmit.totalScore = totalScore;
 
                     try {
-                        await fetch(GOOGLE_FORM_ACTION_URL, {
+                        const response = await fetch(SHEETDB_URL, {
                             method: 'POST',
-                            body: formData,
-                            mode: 'no-cors' // Important for Google Forms
+                            headers: {
+                                'Accept': 'application/json',
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                data: [dataToSubmit]
+                            })
                         });
-                        formMessages.innerHTML = `<p class="bg-green-100 text-green-700 p-3 rounded-md mb-4">Audit submitted successfully to Google Sheet!</p>`;
+
+                        await response.json();
+                        
+                        formMessages.innerHTML = `<p class="bg-green-100 text-green-700 p-3 rounded-md mb-4">Audit submitted successfully!</p>`;
                         form.reset();
                         setTimeout(() => this.navigate('dashboard'), 2000);
                     } catch (err) {
@@ -644,3 +603,4 @@
     </script>
 </body>
 </html>
+
